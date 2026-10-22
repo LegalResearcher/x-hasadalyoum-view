@@ -16,7 +16,7 @@ PROCESSED_PATH = os.path.join(STATE_DIR, "processed_links.txt")   # روابط �
 DONE_PATH = os.path.join(STATE_DIR, "done_links.txt")             # روابط تم تنفيذها
 ATTEMPTS_PATH = os.path.join(STATE_DIR, "failed_attempts.json")   # عدّاد الفشل لكل رابط
 
-X_HANDLE = "hasadalyou"   # حساب تويتر/X (بدون @)
+X_HANDLE = "hasadalyoum1"   # حساب تويتر/X (بدون @)
 # مرايا Nitter لقراءة الحساب (قابلة للتغيير من متغير البيئة NITTER_INSTANCES مفصولة بفواصل)
 NITTER_INSTANCES = [
     h.strip()
