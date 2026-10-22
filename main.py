@@ -20,7 +20,9 @@ X_HANDLE = "hasadalyoum1"   # حساب تويتر/X (بدون @)
 # مرايا Nitter لقراءة الحساب (قابلة للتغيير من متغير البيئة NITTER_INSTANCES مفصولة بفواصل)
 NITTER_INSTANCES = [
     h.strip()
-    for h in os.environ.get("NITTER_INSTANCES", "nitter.net,xcancel.com,nitter.poast.org").split(",")
+    for h in os.environ.get(
+        "NITTER_INSTANCES", "nitter.meowing.monster,nitter.net,xcancel.com,nitter.poast.org"
+    ).split(",")
     if h.strip()
 ]
 
@@ -85,18 +87,25 @@ def tweet_link(tweet_id):
 
 def ids_from_jina_profile():
     """مصدر وسيط: يقرأ صفحة X عبر Jina Reader لتجاوز حجب عناوين GitHub Actions."""
-    # معامل متغير لمنع Jina من إعادة نسخة قديمة من صفحة الحساب.
-    url = f"https://r.jina.ai/http://x.com/{X_HANDLE}?_={int(time.time())}"
-    r = requests.get(url, timeout=45)
-    if r.status_code != 200:
-        raise RuntimeError(f"كود الحالة {r.status_code}")
-    ids = set()
+    urls = (
+        f"https://r.jina.ai/http://x.com/{X_HANDLE}?lang=en",
+        f"https://r.jina.ai/http://x.com/{X_HANDLE}?_={int(time.time())}",
+    )
     pattern = rf"(?:https?://(?:x|twitter)\.com/)?{re.escape(X_HANDLE)}/status/(\d+)"
-    for value in re.findall(pattern, r.text, re.I):
-        ids.add(int(value))
-    if not ids:
-        raise RuntimeError("لم توجد روابط منشورات في نتيجة Jina")
-    return ids
+    errors = []
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=45)
+            if r.status_code != 200:
+                errors.append(f"{url}: كود الحالة {r.status_code}")
+                continue
+            ids = {int(value) for value in re.findall(pattern, r.text, re.I)}
+            if ids:
+                return ids
+            errors.append(f"{url}: لم توجد روابط منشورات")
+        except Exception as e:
+            errors.append(f"{url}: {type(e).__name__}")
+    raise RuntimeError(" | ".join(errors))
 
 
 def ids_from_x_profile():
