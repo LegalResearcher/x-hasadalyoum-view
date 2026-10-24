@@ -1,7 +1,9 @@
 import os
+import json
 import tempfile
 import unittest
 
+from account_rotation import select_account
 from main import run_send
 from processing_state import load_failures, load_successes
 
@@ -71,6 +73,37 @@ class ProcessingTests(unittest.TestCase):
         run_send(FakeSender(["fail"] * 5), self.state)
         self.assertEqual(load_successes(self.state), {})
         self.assertEqual(load_failures(self.state)[self.links[0]], 1)
+
+    def test_account_rotation_is_shared_and_persists_1_2_3_1(self):
+        env = {
+            "SITE_USERNAME_1": "user-1", "SITE_PASSWORD_1": "pass-1",
+            "SITE_USERNAME_2": "user-2", "SITE_PASSWORD_2": "pass-2",
+            "SITE_USERNAME_3": "user-3", "SITE_PASSWORD_3": "pass-3",
+        }
+        selected = [select_account(self.state, env) for _ in range(4)]
+        self.assertEqual([item[0] for item in selected], [1, 2, 3, 1])
+        self.assertEqual(selected[0][1:], ("user-1", "pass-1"))
+        with open(os.path.join(self.state, "account_rotation.json"), encoding="utf-8") as file:
+            self.assertEqual(json.load(file), {"next_account": 2})
+
+    def test_missing_secret_does_not_advance_or_expose_value(self):
+        env = {"SITE_USERNAME_1": "user-1", "SITE_PASSWORD_1": ""}
+        with self.assertRaisesRegex(RuntimeError, "الحساب 1") as context:
+            select_account(self.state, env)
+        self.assertNotIn("user-1", str(context.exception))
+        self.assertFalse(os.path.exists(os.path.join(self.state, "account_rotation.json")))
+
+    def test_corrupt_rotation_state_recovers_at_account_one(self):
+        path = os.path.join(self.state, "account_rotation.json")
+        with open(path, "w", encoding="utf-8") as file:
+            file.write("not-json")
+        account, username, password = select_account(
+            self.state,
+            {"SITE_USERNAME_1": "user-1", "SITE_PASSWORD_1": "pass-1"},
+        )
+        self.assertEqual((account, username, password), (1, "user-1", "pass-1"))
+        with open(path, encoding="utf-8") as file:
+            self.assertEqual(json.load(file), {"next_account": 2})
 
 
 if __name__ == "__main__":

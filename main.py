@@ -5,6 +5,7 @@ import sys
 import time
 
 import requests
+from account_rotation import select_account
 from processing_state import (
     MAX_FAILURES_PER_LINK,
     MAX_SUCCESSES_PER_LINK,
@@ -582,19 +583,21 @@ def run_send(sender, state_dir=STATE_DIR):
 
 
 def main():
-    username = os.environ.get("SITE_USERNAME", "").strip()
-    password = os.environ.get("SITE_PASSWORD", "")
     api_key = os.environ.get("API_KEY", "").strip()
 
-    if username and password:
+    try:
+        account_number, username, password = select_account(STATE_DIR)
         mode = "browser"
-    elif api_key:
+    except RuntimeError as error:
+        if not api_key:
+            log(f"❌ {error}")
+            return 1
+        account_number = None
+        username = password = ""
         mode = "api"
-    else:
-        log("❌ لا توجد بيانات دخول. أضف SITE_USERNAME و SITE_PASSWORD (أو API_KEY) في Secrets.")
-        return 1
 
-    log(f"🚀 بدء التشغيل | الحساب: @{X_HANDLE} | الوضع: {mode}")
+    account_label = str(account_number) if account_number is not None else "API_KEY"
+    log(f"🚀 بدء التشغيل | الحساب: {account_label} | الحساب المصدر: @{X_HANDLE} | الوضع: {mode}")
 
     try:
         pull_once()

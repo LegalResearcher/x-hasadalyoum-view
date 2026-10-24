@@ -40,10 +40,18 @@ jobs:
           python -m pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
+      - name: Sync latest main before account selection
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
       - name: Run script
         env:
-          SITE_USERNAME: ${{ secrets.SITE_USERNAME }}
-          SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}
+          SITE_USERNAME_1: ${{ secrets.SITE_USERNAME_1 }}
+          SITE_PASSWORD_1: ${{ secrets.SITE_PASSWORD_1 }}
+          SITE_USERNAME_2: ${{ secrets.SITE_USERNAME_2 }}
+          SITE_PASSWORD_2: ${{ secrets.SITE_PASSWORD_2 }}
+          SITE_USERNAME_3: ${{ secrets.SITE_USERNAME_3 }}
+          SITE_PASSWORD_3: ${{ secrets.SITE_PASSWORD_3 }}
           API_KEY: ${{ secrets.API_KEY }}
         run: python main.py
 
