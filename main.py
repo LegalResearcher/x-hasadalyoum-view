@@ -602,7 +602,7 @@ def main():
         log(f"❌ خطأ في السحب: {type(e).__name__}: {e}")
 
     # لا نفتح المتصفح إن لم يكن هناك ما يُنفَّذ
-    if not pending_links(load_attempts(), load_successes()):
+    if not pending_links(load_attempts(), load_successes(STATE_DIR)):
         log("💤 الطابور فارغ، لا شيء للتنفيذ.")
         return 0
 
