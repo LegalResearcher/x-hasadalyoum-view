@@ -205,13 +205,13 @@ def pull_once():
     discovered = fetch_links()
     if not discovered:
         log("⏹️ لم يتم العثور على منشورات في الصفحة.")
-        return
+        return []
 
     processed = set(read_lines(PROCESSED_PATH))
     new_links = [l for l in discovered if l not in processed]
     if not new_links:
         log("🔎 لا توجد منشورات جديدة.")
-        return
+        return []
 
     if first_run:
         # أول تشغيل: الأحدث فقط، وباقي ما في الصفحة يُسجَّل كمعالج دون تنفيذ
@@ -220,12 +220,13 @@ def pull_once():
         log(f"🆕 أول تشغيل، أُضيف أحدث رابط فقط: {new_links[-1]}")
         if len(new_links) > 1:
             log(f"ℹ️ تم تجاهل {len(new_links) - 1} منشور أقدم.")
-        return
+        return [new_links[-1]]
 
     # الأشغال العادية: كل الجديد بالترتيب (الأقدم أولاً)
     append_lines(LINKS_PATH, new_links)
     append_lines(PROCESSED_PATH, new_links)
     log(f"✨ أُضيف {len(new_links)} رابط جديد إلى الطابور.")
+    return new_links
 
 
 # ══════════════ التنفيذ ══════════════
@@ -546,6 +547,88 @@ def pending_links(attempts, successes=None, state_dir=STATE_DIR):
     return result
 
 
+def remove_from_queue(links, state_dir=STATE_DIR):
+    selected = set(links)
+    path = os.path.join(state_dir, "telegram_links.txt")
+    remaining = [link for link in read_lines(path) if link not in selected]
+    with open(path, "w", encoding="utf-8") as file:
+        for link in remaining:
+            file.write(link + "\n")
+
+
+def run_new_links(sender, links, state_dir=STATE_DIR):
+    if not links:
+        log("💤 لا توجد روابط جديدة للتنفيذ.")
+        return 0
+    failures = 0
+    processed_count = 0
+    for link in links:
+        log(f"معالجة الرابط الجديد مرة واحدة: {link}")
+        processed_count += 1
+        try:
+            status = sender(link)
+        except Exception as error:
+            log(f"⚠️ تعذر تنفيذ الرابط ({type(error).__name__}: {error})")
+            status = "fail"
+        if status == "fatal":
+            log("⏹️ توقف: تحقق من المفتاح أو الرصيد.")
+            failures += 1
+            break
+        if status == "ok":
+            log("✅ نجح الرابط.")
+        else:
+            log("⚠️ لم ينجح الطلب عبر الموقع.")
+            failures += 1
+    remove_from_queue(links[:processed_count], state_dir)
+    log(f"انتهى التشغيل بعد معالجة {processed_count} روابط.")
+    return 1 if failures else 0
+
+
+def run_previous_links_until_five(sender, state_dir=STATE_DIR):
+    attempts = load_failures(state_dir)
+    successes = load_successes(state_dir)
+    processed_path = os.path.join(state_dir, "processed_links.txt")
+    queue_path = os.path.join(state_dir, "telegram_links.txt")
+    all_links = list(dict.fromkeys(
+        list(reversed(read_lines(processed_path)))
+        + list(reversed(read_lines(queue_path)))
+    ))
+    eligible = [
+        link for link in all_links
+        if can_process(link, state_dir, successes, attempts)
+    ]
+    if not eligible:
+        log("💤 لا توجد روابط سابقة مؤهلة للدفع.")
+        return 0
+    log(f"🔁 لا توجد روابط جديدة؛ استكمال الروابط السابقة حتى {MAX_SUCCESSES_PER_LINK} نجاحات.")
+    failures = 0
+    tries = 0
+    for link in eligible:
+        if tries >= MAX_TRIES_PER_RUN:
+            break
+        tries += 1
+        log(f"معالجة سابقة ({successes.get(link, 0)}/{MAX_SUCCESSES_PER_LINK} نجاح): {link}")
+        try:
+            status = sender(link)
+        except Exception as error:
+            log(f"⚠️ تعذر تنفيذ الرابط ({type(error).__name__}: {error})")
+            status = "fail"
+        if status == "fatal":
+            log("⏹️ توقف: تحقق من المفتاح أو الرصيد.")
+            return 1
+        if status == "ok":
+            _, result = record_result(link, status, state_dir, successes, attempts)
+            if result == "success":
+                log(f"✅ نجاح الرابط: {successes[link]}/{MAX_SUCCESSES_PER_LINK}.")
+        else:
+            _, result = record_result(link, status, state_dir, successes, attempts)
+            failures += 1
+            if result == "failure_limit":
+                log(f"🚫 تم تخطي الرابط بعد {MAX_FAILURES_PER_LINK} محاولات فاشلة.")
+    log(f"انتهى تشغيل الروابط السابقة بعد {tries} طلبات؛ الحد {MAX_TRIES_PER_RUN} طلبات.")
+    return 1 if failures else 0
+
+
 def run_send(sender, state_dir=STATE_DIR):
     attempts = load_failures(state_dir)
     successes = load_successes(state_dir)
@@ -599,21 +682,26 @@ def main():
     account_label = str(account_number) if account_number is not None else "API_KEY"
     log(f"🚀 بدء التشغيل | الحساب: {account_label} | الحساب المصدر: @{X_HANDLE} | الوضع: {mode}")
 
+    processed_before_pull = set(read_lines(PROCESSED_PATH))
+    fetch_failed = False
+    links = []
     try:
-        pull_once()
+        links = pull_once()
     except Exception as e:
+        fetch_failed = True
         log(f"❌ خطأ في السحب: {type(e).__name__}: {e}")
 
-    # لا نفتح المتصفح إن لم يكن هناك ما يُنفَّذ
-    if not pending_links(load_attempts(), load_successes(STATE_DIR)):
-        log("💤 الطابور فارغ، لا شيء للتنفيذ.")
-        return 0
-
+    has_new_links = any(link not in processed_before_pull for link in links)
     if mode == "api":
-        return run_send(lambda link: send_order(api_key, link))
+        sender = lambda link: send_order(api_key, link)
+        if fetch_failed or not has_new_links:
+            return run_previous_links_until_five(sender)
+        return run_new_links(sender, links)
 
     with BrowserSender(username, password) as sender:
-        return run_send(sender)
+        if fetch_failed or not has_new_links:
+            return run_previous_links_until_five(sender)
+        return run_new_links(sender, links)
 
 
 if __name__ == "__main__":
